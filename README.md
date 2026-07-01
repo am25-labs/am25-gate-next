@@ -285,6 +285,47 @@ export async function syncGateRoles() {
 
 Each app owns its permissions schema. The SDK only fetches Gate roles and hands them to your app so it can upsert local RBAC rows without overwriting permission flags.
 
+
+### Confirming critical actions with OTP
+
+Apps can request a short-lived step-up proof before running sensitive mutations. Add the `step_up` scope to the login flow, create a challenge on the server, collect the user's OTP in your UI, then require the proof token before executing the mutation.
+
+```ts
+import { createStepUpHelpers } from "@am25/gate-next";
+
+const stepUp = createStepUpHelpers({
+  issuer: process.env.GATE_ISSUER!,
+  clientId: process.env.GATE_CLIENT_ID!,
+});
+
+export async function startDeleteProject(projectId: string) {
+  return stepUp.createChallenge({
+    action: "project.delete",
+    context: { projectId },
+  });
+}
+
+export async function confirmDeleteProject(input: {
+  projectId: string;
+  code: string;
+  challengeToken: string;
+}) {
+  const { proofToken } = await stepUp.verifyChallenge({
+    challengeToken: input.challengeToken,
+    code: input.code,
+  });
+
+  await stepUp.requireProof(proofToken, {
+    action: "project.delete",
+    context: { projectId: input.projectId },
+  });
+
+  // Run the critical mutation here.
+}
+```
+
+For non-idempotent actions, include a unique `intentId` in `context` and validate the same context when requiring the proof. Each app owns the final UI, commonly an `AlertDialog` with an OTP input.
+
 ### Checking roles
 
 Roles are available by default (the `roles` scope is included). If for some reason you need to exclude them, configure `scopes` without `"roles"` in the proxy or in `getLoginUrl`.
@@ -414,8 +455,9 @@ Gate supports the following OIDC scopes:
 | `profile` | `name`, `lastName`                    |
 | `email`   | `email`                               |
 | `roles`   | `{issuer}/is_admin`, `{issuer}/roles` |
+| `step_up` | Allows OTP confirmation for critical actions |
 
-The default scope is `openid profile email roles`.
+The default scope is `openid profile email roles`. Add `step_up` when the app needs OTP confirmation for critical actions.
 
 Role claims use a namespace URI for compatibility with the OIDC standard. The SDK resolves them automatically in `getUser()`.
 
@@ -568,6 +610,25 @@ Creates server-side helpers to fetch Gate's global role catalog and sync it into
 | ------------- | ----------------------- | ----------------------------------- |
 | `getRoles()`  | `Promise<GateRole[]>`   | Fetches roles from `/oauth/roles`   |
 | `syncRoles()` | `Promise<GateRole[]>`   | Fetches roles and calls your upsert |
+
+### `createStepUpHelpers(options)`
+
+Creates server-side helpers for Gate OTP step-up challenges and proof validation.
+
+| Option             | Type   | Required | Default     | Description              |
+| ------------------ | ------ | -------- | ----------- | ------------------------ |
+| `issuer`           | string | Yes      |             | Gate server URL          |
+| `clientId`         | string | Yes      |             | App Client ID            |
+| `accessCookieName` | string | No       | `"am25_at"` | Access token cookie name |
+
+| Helper              | Returns                              | Description                                |
+| ------------------- | ------------------------------------ | ------------------------------------------ |
+| `createChallenge()` | `Promise<StepUpChallenge>`           | Creates a Gate challenge for an action     |
+| `verifyChallenge()` | `Promise<StepUpProof>`               | Verifies OTP and returns a proof token     |
+| `verifyProof()`     | `Promise<StepUpProofPayload \| null>` | Validates a proof token with JWKS          |
+| `requireProof()`    | `Promise<StepUpProofPayload>`        | Validates a proof token or throws          |
+
+The app must request the `step_up` scope during login before using these helpers.
 
 ### `verifyTokenWithJWKS(token, issuer, expectedTyp)`
 

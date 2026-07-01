@@ -1,4 +1,4 @@
-import { createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose";
+import { createRemoteJWKSet, jwtVerify, type JWTPayload, type JWTVerifyOptions } from "jose";
 
 const jwksCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
 
@@ -16,9 +16,11 @@ export async function verifyTokenWithJWKS(
   token: string,
   issuer: string,
   expectedTyp?: string,
+  options: Omit<JWTVerifyOptions, "issuer"> = {},
 ): Promise<JWTPayload> {
   const JWKS = getJWKS(issuer);
   const { payload, protectedHeader } = await jwtVerify(token, JWKS, {
+    ...options,
     issuer: issuer.replace(/\/$/, ""),
   });
   if (expectedTyp && protectedHeader.typ !== expectedTyp) {
