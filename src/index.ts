@@ -14,3 +14,6 @@ export { getLoginUrl, getLogoutUrl, createAuthConfig } from "./lib/auth.js";
 export type { LoginUrlOptions, LogoutUrlOptions, AuthConfigOptions, AuthConfig } from "./lib/auth.js";
 
 export { verifyTokenWithJWKS, clearJWKSCache } from "./lib/jwks.js";
+
+export { createRoleHelpers } from "./lib/roles.js";
+export type { RoleHelpersOptions, GateRole, RoleUpsert, RoleHelpers } from "./lib/roles.js";

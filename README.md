@@ -255,6 +255,36 @@ export default async function DashboardPage() {
 }
 ```
 
+
+### Syncing Gate roles into local RBAC
+
+Gate can expose the global role catalog to client apps through `/oauth/roles`. The SDK stores an `am25_at` httpOnly access token during the OAuth callback and uses it from server-side helpers.
+
+```ts
+import { createRoleHelpers } from "@am25/gate-next";
+import prisma from "@/lib/prisma";
+
+const roles = createRoleHelpers({
+  issuer: process.env.GATE_ISSUER!,
+});
+
+export async function syncGateRoles() {
+  return roles.syncRoles(async (gateRoles) => {
+    await Promise.all(
+      gateRoles.map((role) =>
+        prisma.role.upsert({
+          where: { gateKey: role.key },
+          update: { name: role.name, gateId: role.id },
+          create: { gateId: role.id, gateKey: role.key, name: role.name },
+        }),
+      ),
+    );
+  });
+}
+```
+
+Each app owns its permissions schema. The SDK only fetches Gate roles and hands them to your app so it can upsert local RBAC rows without overwriting permission flags.
+
 ### Checking roles
 
 Roles are available by default (the `roles` scope is included). If for some reason you need to exclude them, configure `scopes` without `"roles"` in the proxy or in `getLoginUrl`.
@@ -441,12 +471,13 @@ Creates the handler to exchange the authorization code for tokens.
 | `clientId`        | string | Yes      |                 | Client ID                             |
 | `clientSecret`    | string | Yes      |                 | Client Secret                         |
 | `redirectUri`     | string | Yes      |                 | Callback URI (must match Gate config) |
-| `cookieName`      | string | No       | `"am25_sess"`   | Cookie name                           |
+| `cookieName`      | string | No       | `"am25_sess"`   | Session cookie name                   |
+| `accessCookieName` | string | No       | `"am25_at"`     | Access token cookie name              |
 | `cookieDomain`    | string | No       |                 | Cookie domain (e.g. `.example.com`)   |
 | `cookieMaxAge`    | number | No       | `2592000` (30d) | Duration in seconds                   |
 | `defaultRedirect` | string | No       | `"/dashboard"`  | Route after login                     |
 
-The handler stores the `session_token` (or `access_token` as fallback) in an httpOnly cookie.
+The handler stores the `session_token` (or `access_token` as fallback) in an httpOnly session cookie. It also stores `access_token` in a separate httpOnly cookie with a maximum age of 1 hour for server-side SDK helpers.
 
 ### `createLogoutHandler(options)`
 
@@ -523,6 +554,20 @@ const auth = createAuthConfig({
 const loginUrl = auth.getLoginUrl("/dashboard");
 const logoutUrl = auth.getLogoutUrl("/");
 ```
+
+### `createRoleHelpers(options)`
+
+Creates server-side helpers to fetch Gate's global role catalog and sync it into the app's local RBAC tables.
+
+| Option             | Type   | Required | Default     | Description              |
+| ------------------ | ------ | -------- | ----------- | ------------------------ |
+| `issuer`           | string | Yes      |             | Gate server URL          |
+| `accessCookieName` | string | No       | `"am25_at"` | Access token cookie name |
+
+| Helper        | Returns                 | Description                         |
+| ------------- | ----------------------- | ----------------------------------- |
+| `getRoles()`  | `Promise<GateRole[]>`   | Fetches roles from `/oauth/roles`   |
+| `syncRoles()` | `Promise<GateRole[]>`   | Fetches roles and calls your upsert |
 
 ### `verifyTokenWithJWKS(token, issuer, expectedTyp)`
 

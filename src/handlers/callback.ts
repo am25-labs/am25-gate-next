@@ -6,6 +6,7 @@ export interface CallbackHandlerOptions {
   clientSecret: string;
   redirectUri: string;
   cookieName?: string;
+  accessCookieName?: string;
   cookieDomain?: string;
   cookieMaxAge?: number;
   defaultRedirect?: string;
@@ -18,6 +19,7 @@ export function createCallbackHandler(options: CallbackHandlerOptions) {
     clientSecret,
     redirectUri,
     cookieName = "am25_sess",
+    accessCookieName = "am25_at",
     cookieDomain,
     cookieMaxAge = 60 * 60 * 24 * 30,
     defaultRedirect = "/dashboard",
@@ -89,18 +91,29 @@ export function createCallbackHandler(options: CallbackHandlerOptions) {
 
       const response = NextResponse.redirect(`${appOrigin}${redirectTo}`);
 
+      const cookieOptions = {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax" as const,
+        domain: cookieDomain,
+        path: "/",
+      };
+
       response.cookies.set(
         cookieName,
         tokens.session_token || tokens.access_token,
         {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === "production",
-          sameSite: "lax",
-          domain: cookieDomain,
+          ...cookieOptions,
           maxAge: cookieMaxAge,
-          path: "/",
         },
       );
+
+      if (tokens.access_token) {
+        response.cookies.set(accessCookieName, tokens.access_token, {
+          ...cookieOptions,
+          maxAge: Math.min(cookieMaxAge, 60 * 60),
+        });
+      }
 
       return response;
     } catch (error) {
