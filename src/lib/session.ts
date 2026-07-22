@@ -13,6 +13,7 @@ export interface GateUser {
   email: string;
   name: string;
   lastName: string;
+  picture: string | null;
   isAdmin: boolean;
   roles: string[];
 }
@@ -58,6 +59,7 @@ export function createSessionHelpers(options: SessionHelpersOptions): SessionHel
       email: session.email as string,
       name: session.name as string,
       lastName: session.lastName as string,
+      picture: (session.picture as string | undefined) ?? null,
       isAdmin: (session[nsIsAdmin] as boolean) ?? false,
       roles: (session[nsRoles] as string[]) ?? [],
     };

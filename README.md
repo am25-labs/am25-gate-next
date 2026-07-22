@@ -452,7 +452,7 @@ Gate supports the following OIDC scopes:
 | Scope     | Claims included in the token          |
 | --------- | ------------------------------------- |
 | `openid`  | `sub` (required for OIDC)             |
-| `profile` | `name`, `lastName`                    |
+| `profile` | `name`, `lastName`, `picture`        |
 | `email`   | `email`                               |
 | `roles`   | `{issuer}/is_admin`, `{issuer}/roles` |
 | `step_up` | Allows OTP confirmation for critical actions |
@@ -471,6 +471,7 @@ interface GateUser {
   email: string;     // requires "email" scope
   name: string;      // requires "profile" scope
   lastName: string;  // requires "profile" scope
+  picture: string | null; // requires "profile" scope
   isAdmin: boolean;  // requires "roles" scope (default: false)
   roles: string[];   // requires "roles" scope (default: [])
 }
