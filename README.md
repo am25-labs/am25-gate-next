@@ -288,7 +288,7 @@ Each app owns its permissions schema. The SDK only fetches Gate roles and hands 
 
 ### Confirming critical actions with OTP
 
-Apps can request a short-lived step-up proof before running sensitive mutations. Add the `step_up` scope to the login flow, create a challenge on the server, collect the user's OTP in your UI, then require the proof token before executing the mutation.
+Apps can request a short-lived step-up proof before running sensitive mutations. Add the `step_up` scope to the login flow, collect the user's OTP in your UI, then verify it server-side before executing the mutation.
 
 ```ts
 import { createStepUpHelpers } from "@am25/gate-next";
@@ -298,20 +298,13 @@ const stepUp = createStepUpHelpers({
   clientId: process.env.GATE_CLIENT_ID!,
 });
 
-export async function startDeleteProject(projectId: string) {
-  return stepUp.createChallenge({
-    action: "project.delete",
-    context: { projectId },
-  });
-}
-
 export async function confirmDeleteProject(input: {
   projectId: string;
   code: string;
-  challengeToken: string;
 }) {
-  const { proofToken } = await stepUp.verifyChallenge({
-    challengeToken: input.challengeToken,
+  const { proofToken } = await stepUp.verifyOtp({
+    action: "project.delete",
+    context: { projectId: input.projectId },
     code: input.code,
   });
 
@@ -620,12 +613,14 @@ Creates server-side helpers for Gate OTP step-up challenges and proof validation
 | ------------------ | ------ | -------- | ----------- | ------------------------ |
 | `issuer`           | string | Yes      |             | Gate server URL          |
 | `clientId`         | string | Yes      |             | App Client ID            |
-| `accessCookieName` | string | No       | `"am25_at"` | Access token cookie name |
+| `cookieName`       | string | No       | `"am25_sess"` | Session token cookie name         |
+| `accessCookieName` | string | No       | `"am25_at"`   | Access token fallback cookie name |
 
 | Helper              | Returns                              | Description                                |
 | ------------------- | ------------------------------------ | ------------------------------------------ |
 | `createChallenge()` | `Promise<StepUpChallenge>`           | Creates a Gate challenge for an action     |
-| `verifyChallenge()` | `Promise<StepUpProof>`               | Verifies OTP and returns a proof token     |
+| `verifyChallenge()` | `Promise<StepUpProof>`               | Verifies a pre-created challenge           |
+| `verifyOtp()`       | `Promise<StepUpProof>`               | Creates a fresh challenge and verifies OTP |
 | `verifyProof()`     | `Promise<StepUpProofPayload \| null>` | Validates a proof token with JWKS          |
 | `requireProof()`    | `Promise<StepUpProofPayload>`        | Validates a proof token or throws          |
 

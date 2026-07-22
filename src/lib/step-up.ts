@@ -5,6 +5,7 @@ import { verifyTokenWithJWKS } from "./jwks.js";
 export interface StepUpHelpersOptions {
   issuer: string;
   clientId: string;
+  cookieName?: string;
   accessCookieName?: string;
 }
 
@@ -44,9 +45,16 @@ export interface VerifyChallengeOptions {
   code: string;
 }
 
+export interface VerifyOtpOptions {
+  action: string;
+  context?: unknown;
+  code: string;
+}
+
 export interface StepUpHelpers {
   createChallenge: (options: CreateChallengeOptions) => Promise<StepUpChallenge>;
   verifyChallenge: (options: VerifyChallengeOptions) => Promise<StepUpProof>;
+  verifyOtp: (options: VerifyOtpOptions) => Promise<StepUpProof>;
   verifyProof: (proofToken: string, options: StepUpOptions) => Promise<StepUpProofPayload | null>;
   requireProof: (proofToken: string, options: StepUpOptions) => Promise<StepUpProofPayload>;
 }
@@ -73,12 +81,12 @@ function hashContext(context?: unknown): string {
     .digest("base64url");
 }
 
-async function getAccessToken(accessCookieName: string): Promise<string> {
+async function getBearerToken(cookieName: string, accessCookieName: string): Promise<string> {
   const cookieStore = await cookies();
-  const token = cookieStore.get(accessCookieName)?.value;
+  const token = cookieStore.get(cookieName)?.value ?? cookieStore.get(accessCookieName)?.value;
 
   if (!token) {
-    throw new Error("Access token not found");
+    throw new Error("Step-up token not found");
   }
 
   return token;
@@ -101,7 +109,7 @@ function assertProofPayload(payload: unknown): asserts payload is StepUpProofPay
 }
 
 export function createStepUpHelpers(options: StepUpHelpersOptions): StepUpHelpers {
-  const { issuer, clientId, accessCookieName = "am25_at" } = options;
+  const { issuer, clientId, cookieName = "am25_sess", accessCookieName = "am25_at" } = options;
 
   if (!issuer) throw new Error("issuer is required");
   if (!clientId) throw new Error("clientId is required");
@@ -109,7 +117,7 @@ export function createStepUpHelpers(options: StepUpHelpersOptions): StepUpHelper
   const baseUrl = issuer.replace(/\/$/, "");
 
   const createChallenge = async ({ action, context }: CreateChallengeOptions): Promise<StepUpChallenge> => {
-    const token = await getAccessToken(accessCookieName);
+    const token = await getBearerToken(cookieName, accessCookieName);
     const response = await fetch(`${baseUrl}/oauth/step-up/challenge`, {
       method: "POST",
       headers: {
@@ -129,7 +137,7 @@ export function createStepUpHelpers(options: StepUpHelpersOptions): StepUpHelper
   };
 
   const verifyChallenge = async ({ challengeToken, code }: VerifyChallengeOptions): Promise<StepUpProof> => {
-    const token = await getAccessToken(accessCookieName);
+    const token = await getBearerToken(cookieName, accessCookieName);
     const response = await fetch(`${baseUrl}/oauth/step-up/verify`, {
       method: "POST",
       headers: {
@@ -137,6 +145,26 @@ export function createStepUpHelpers(options: StepUpHelpersOptions): StepUpHelper
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ challenge_token: challengeToken, code }),
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      throw new Error("Step-up verification failed");
+    }
+
+    const data = (await response.json()) as { proof_token: string; expires_in: number };
+    return { proofToken: data.proof_token, expiresIn: data.expires_in };
+  };
+
+  const verifyOtp = async ({ action, context, code }: VerifyOtpOptions): Promise<StepUpProof> => {
+    const token = await getBearerToken(cookieName, accessCookieName);
+    const response = await fetch(`${baseUrl}/oauth/step-up/verify`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ action, context, code }),
       cache: "no-store",
     });
 
@@ -182,6 +210,7 @@ export function createStepUpHelpers(options: StepUpHelpersOptions): StepUpHelper
   return {
     createChallenge,
     verifyChallenge,
+    verifyOtp,
     verifyProof,
     requireProof,
   };

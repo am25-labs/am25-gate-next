@@ -19,4 +19,4 @@ export { createRoleHelpers } from "./lib/roles.js";
 export type { RoleHelpersOptions, GateRole, RoleUpsert, RoleHelpers } from "./lib/roles.js";
 
 export { createStepUpHelpers } from "./lib/step-up.js";
-export type { StepUpHelpersOptions, StepUpOptions, StepUpChallenge, StepUpProof, StepUpProofPayload, StepUpHelpers } from "./lib/step-up.js";
+export type { StepUpHelpersOptions, StepUpOptions, StepUpChallenge, StepUpProof, StepUpProofPayload, VerifyOtpOptions, StepUpHelpers } from "./lib/step-up.js";
