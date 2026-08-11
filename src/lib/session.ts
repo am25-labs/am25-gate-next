@@ -15,7 +15,6 @@ export interface GateUser {
   lastName: string;
   picture: string | null;
   isAdmin: boolean;
-  roles: string[];
 }
 
 export interface SessionHelpers {
@@ -24,8 +23,6 @@ export interface SessionHelpers {
   isAuthenticated: () => Promise<boolean>;
   requireAuth: () => Promise<GateUser>;
   requireAdmin: () => Promise<GateUser>;
-  hasRole: (roleKey: string) => Promise<boolean>;
-  requireRole: (roleKey: string) => Promise<GateUser>;
 }
 
 export function createSessionHelpers(options: SessionHelpersOptions): SessionHelpers {
@@ -48,7 +45,6 @@ export function createSessionHelpers(options: SessionHelpersOptions): SessionHel
   });
 
   const nsIsAdmin = `${issuer.replace(/\/$/, "")}/is_admin`;
-  const nsRoles = `${issuer.replace(/\/$/, "")}/roles`;
 
   const getUser = cache(async (): Promise<GateUser | null> => {
     const session = await getSession();
@@ -61,7 +57,6 @@ export function createSessionHelpers(options: SessionHelpersOptions): SessionHel
       lastName: session.lastName as string,
       picture: (session.picture as string | undefined) ?? null,
       isAdmin: (session[nsIsAdmin] as boolean) ?? false,
-      roles: (session[nsRoles] as string[]) ?? [],
     };
   });
 
@@ -86,27 +81,11 @@ export function createSessionHelpers(options: SessionHelpersOptions): SessionHel
     return user;
   };
 
-  const hasRole = async (roleKey: string): Promise<boolean> => {
-    const user = await getUser();
-    if (!user) return false;
-    return user.roles.includes(roleKey);
-  };
-
-  const requireRole = async (roleKey: string): Promise<GateUser> => {
-    const user = await requireAuth();
-    if (!user.roles.includes(roleKey)) {
-      throw new Error(`Role required: ${roleKey}`);
-    }
-    return user;
-  };
-
   return {
     getSession,
     getUser,
     isAuthenticated,
     requireAuth,
     requireAdmin,
-    hasRole,
-    requireRole,
   };
 }

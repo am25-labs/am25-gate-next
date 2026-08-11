@@ -19,7 +19,7 @@ export function createGateProxy(options: GateProxyOptions) {
     publicPaths = [],
     clientId,
     redirectUri,
-    scopes = ["openid", "profile", "email", "roles"],
+    scopes = ["openid", "profile", "email", "users"],
   } = options;
 
   if (!issuer) throw new Error("issuer is required");

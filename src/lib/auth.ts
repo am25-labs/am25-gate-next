@@ -32,7 +32,7 @@ export function getLoginUrl(options: LoginUrlOptions): string {
     issuer,
     clientId,
     redirectUri,
-    scopes = ["openid", "profile", "email", "roles"],
+    scopes = ["openid", "profile", "email", "users"],
     returnTo,
   } = options;
 
@@ -71,7 +71,7 @@ export function createAuthConfig(config: AuthConfigOptions): AuthConfig {
     issuer,
     clientId,
     redirectUri,
-    scopes = ["openid", "profile", "email"],
+    scopes = ["openid", "profile", "email", "users"],
   } = config;
 
   return {

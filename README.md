@@ -11,7 +11,7 @@ Server-side SDK for integrating Next.js 16+ applications with **AM25 Gate IdP**,
 - httpOnly Cookie: Secure session shared across subdomains
 - React Helpers: Cached functions for Server Components
 - RS256 (JWKS): Token verification using public keys, no shared secrets
-- Roles and permissions: Access user roles via the `roles` scope
+- Assigned users: Fetch the users assigned to the current client app
 
 ## Installation
 
@@ -207,8 +207,6 @@ export const {
   isAuthenticated,
   requireAuth,
   requireAdmin,
-  hasRole,
-  requireRole,
 } = createSessionHelpers({
   issuer: process.env.GATE_ISSUER!,
 });
@@ -226,8 +224,6 @@ export const {
   isAuthenticated,
   requireAuth,
   requireAdmin,
-  hasRole,
-  requireRole,
 } = createSessionHelpers({
   issuer: process.env.GATE_ISSUER,
 });
@@ -256,26 +252,31 @@ export default async function DashboardPage() {
 ```
 
 
-### Syncing Gate roles into local RBAC
+### Syncing assigned Gate users
 
-Gate can expose the global role catalog to client apps through `/oauth/roles`. The SDK stores an `am25_at` httpOnly access token during the OAuth callback and uses it from server-side helpers.
+Gate exposes the users assigned to the current client app through `/oauth/users`. The SDK stores an `am25_at` httpOnly access token during the OAuth callback and uses it from server-side helpers.
 
 ```ts
-import { createRoleHelpers } from "@am25/gate-next";
+import { createUserHelpers } from "@am25/gate-next";
 import prisma from "@/lib/prisma";
 
-const roles = createRoleHelpers({
+const users = createUserHelpers({
   issuer: process.env.GATE_ISSUER!,
 });
 
-export async function syncGateRoles() {
-  return roles.syncRoles(async (gateRoles) => {
+export async function syncGateUsers() {
+  return users.syncUsers(async (gateUsers) => {
     await Promise.all(
-      gateRoles.map((role) =>
-        prisma.role.upsert({
-          where: { gateKey: role.key },
-          update: { name: role.name, gateId: role.id },
-          create: { gateId: role.id, gateKey: role.key, name: role.name },
+      gateUsers.map((user) =>
+        prisma.user.upsert({
+          where: { gateId: user.id },
+          update: { email: user.email, name: user.name, lastName: user.lastName },
+          create: {
+            gateId: user.id,
+            email: user.email,
+            name: user.name,
+            lastName: user.lastName,
+          },
         }),
       ),
     );
@@ -283,7 +284,7 @@ export async function syncGateRoles() {
 }
 ```
 
-Each app owns its permissions schema. The SDK only fetches Gate roles and hands them to your app so it can upsert local RBAC rows without overwriting permission flags.
+Each app owns its roles and permissions. The SDK only fetches assigned Gate users so your app can manage local access data.
 
 
 ### Confirming critical actions with OTP
@@ -318,22 +319,6 @@ export async function confirmDeleteProject(input: {
 ```
 
 For non-idempotent actions, include a unique `intentId` in `context` and validate the same context when requiring the proof. Each app owns the final UI, commonly an `AlertDialog` with an OTP input.
-
-### Checking roles
-
-Roles are available by default (the `roles` scope is included). If for some reason you need to exclude them, configure `scopes` without `"roles"` in the proxy or in `getLoginUrl`.
-
-```tsx
-import { requireRole, hasRole } from "@/lib/auth";
-
-export default async function EditorPage() {
-  await requireRole("editor");
-
-  const canPublish = await hasRole("publisher");
-
-  return <div>...</div>;
-}
-```
 
 ### In Server Actions
 
@@ -447,12 +432,10 @@ Gate supports the following OIDC scopes:
 | `openid`  | `sub` (required for OIDC)             |
 | `profile` | `name`, `lastName`, `picture`        |
 | `email`   | `email`                               |
-| `roles`   | `{issuer}/is_admin`, `{issuer}/roles` |
+| `users`   | Allows fetching assigned users        |
 | `step_up` | Allows OTP confirmation for critical actions |
 
-The default scope is `openid profile email roles`. Add `step_up` when the app needs OTP confirmation for critical actions.
-
-Role claims use a namespace URI for compatibility with the OIDC standard. The SDK resolves them automatically in `getUser()`.
+The default scope is `openid profile email users`. Add `step_up` when the app needs OTP confirmation for critical actions.
 
 ## User data
 
@@ -465,8 +448,7 @@ interface GateUser {
   name: string;      // requires "profile" scope
   lastName: string;  // requires "profile" scope
   picture: string | null; // requires "profile" scope
-  isAdmin: boolean;  // requires "roles" scope (default: false)
-  roles: string[];   // requires "roles" scope (default: [])
+  isAdmin: boolean;
 }
 ```
 
@@ -493,7 +475,7 @@ Creates a proxy to protect routes in Next.js 16.
 | `protectedPaths` | string[] | No       | `["/dashboard"]`                          | Routes to protect                   |
 | `publicPaths`    | string[] | No       | `[]`                                      | Public routes inside protectedPaths |
 | `cookieName`     | string   | No       | `"am25_sess"`                             | Cookie name                         |
-| `scopes`         | string[] | No       | `["openid", "profile", "email", "roles"]` | Scopes requested during redirect    |
+| `scopes`         | string[] | No       | `["openid", "profile", "email", "users"]` | Scopes requested during redirect    |
 
 Returns `null` if the route does not require protection or the session is valid. Returns `NextResponse.redirect` if authentication is required.
 
@@ -547,8 +529,6 @@ Returns a `SessionHelpers` object:
 | `isAuthenticated()`    | `boolean`              | Whether a session exists                 |
 | `requireAuth()`        | `GateUser`             | User data, throws if not authenticated   |
 | `requireAdmin()`       | `GateUser`             | User data, throws if not admin           |
-| `hasRole(roleKey)`     | `boolean`              | Checks if the user has a role            |
-| `requireRole(roleKey)` | `GateUser`             | User data, throws if the role is missing |
 
 All functions are cached per request using `React.cache()`.
 
@@ -561,7 +541,7 @@ Generates the URL to start the OAuth flow.
 | `issuer`      | string   | Yes      |                                           | Gate server URL                |
 | `clientId`    | string   | Yes      |                                           | Client ID                      |
 | `redirectUri` | string   | Yes      |                                           | Callback URI                   |
-| `scopes`      | string[] | No       | `["openid", "profile", "email", "roles"]` | Scopes to request              |
+| `scopes`      | string[] | No       | `["openid", "profile", "email", "users"]` | Scopes to request              |
 | `returnTo`    | string   | No       |                                           | Route to return to after login |
 
 ### `getLogoutUrl(options)`
@@ -584,16 +564,16 @@ const auth = createAuthConfig({
   issuer: process.env.NEXT_PUBLIC_GATE_ISSUER!,
   clientId: process.env.NEXT_PUBLIC_GATE_CLIENT_ID!,
   redirectUri: process.env.NEXT_PUBLIC_GATE_REDIRECT_URI!,
-  scopes: ["openid", "profile", "email", "roles"],
+  scopes: ["openid", "profile", "email", "users"],
 });
 
 const loginUrl = auth.getLoginUrl("/dashboard");
 const logoutUrl = auth.getLogoutUrl("/");
 ```
 
-### `createRoleHelpers(options)`
+### `createUserHelpers(options)`
 
-Creates server-side helpers to fetch Gate's global role catalog and sync it into the app's local RBAC tables.
+Creates server-side helpers to fetch users assigned to the current Gate client and sync them into the app.
 
 | Option             | Type   | Required | Default     | Description              |
 | ------------------ | ------ | -------- | ----------- | ------------------------ |
@@ -602,8 +582,8 @@ Creates server-side helpers to fetch Gate's global role catalog and sync it into
 
 | Helper        | Returns                 | Description                         |
 | ------------- | ----------------------- | ----------------------------------- |
-| `getRoles()`  | `Promise<GateRole[]>`   | Fetches roles from `/oauth/roles`   |
-| `syncRoles()` | `Promise<GateRole[]>`   | Fetches roles and calls your upsert |
+| `getUsers()`  | `Promise<GateAssignedUser[]>` | Fetches users from `/oauth/users` |
+| `syncUsers()` | `Promise<GateAssignedUser[]>` | Fetches users and calls your sync |
 
 ### `createStepUpHelpers(options)`
 
@@ -733,7 +713,7 @@ Gate manages access at two levels:
 
 **Per application:** In the Gate dashboard you configure which users can access each app. Administrators automatically have access to all apps. If an unauthorized user tries to authenticate, Gate returns a 403 error.
 
-**Per role (inside the app):** Roles travel as claims in the token when the `roles` scope is requested. Each app decides how to use them internally (e.g. show/hide features, protect routes).
+**Per app roles and permissions:** Each client app owns its own role and permission model. Gate only authenticates users and controls which users can access each app.
 
 ## Internal vs third-party clients
 
