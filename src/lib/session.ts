@@ -15,6 +15,9 @@ export interface GateUser {
   lastName: string;
   picture: string | null;
   isAdmin: boolean;
+  organizationId: string | null;
+  organizationType: "CUSTOMER" | "INTERNAL" | null;
+  organizationRole: "OWNER" | "MEMBER" | null;
 }
 
 export interface SessionHelpers {
@@ -45,6 +48,10 @@ export function createSessionHelpers(options: SessionHelpersOptions): SessionHel
   });
 
   const nsIsAdmin = `${issuer.replace(/\/$/, "")}/is_admin`;
+  const namespace = issuer.replace(/\/$/, "");
+  const nsOrganizationId = `${namespace}/organization_id`;
+  const nsOrganizationType = `${namespace}/organization_type`;
+  const nsOrganizationRole = `${namespace}/organization_role`;
 
   const getUser = cache(async (): Promise<GateUser | null> => {
     const session = await getSession();
@@ -57,6 +64,20 @@ export function createSessionHelpers(options: SessionHelpersOptions): SessionHel
       lastName: session.lastName as string,
       picture: (session.picture as string | undefined) ?? null,
       isAdmin: (session[nsIsAdmin] as boolean) ?? false,
+      organizationId:
+        typeof session[nsOrganizationId] === "string"
+          ? session[nsOrganizationId]
+          : null,
+      organizationType:
+        session[nsOrganizationType] === "CUSTOMER" ||
+        session[nsOrganizationType] === "INTERNAL"
+          ? session[nsOrganizationType]
+          : null,
+      organizationRole:
+        session[nsOrganizationRole] === "OWNER" ||
+        session[nsOrganizationRole] === "MEMBER"
+          ? session[nsOrganizationRole]
+          : null,
     };
   });
 
