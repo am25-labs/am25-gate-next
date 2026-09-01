@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { verifyTokenWithJWKS } from "./lib/jwks.js";
+import { createAuthorizationResponse } from "./lib/oauth-transaction.js";
 
 export interface GateProxyOptions {
   issuer: string;
@@ -77,18 +78,12 @@ function redirectToLogin(
   clientId: string,
   redirectUri: string,
   scopes: string[],
-): NextResponse {
+): Promise<NextResponse> {
   const returnTo = request.nextUrl.pathname + request.nextUrl.search;
-  const state = Buffer.from(JSON.stringify({ returnTo })).toString("base64url");
-
-  const authUrl = new URL("/oauth/authorize", issuer);
-  authUrl.searchParams.set("client_id", clientId);
-  authUrl.searchParams.set("redirect_uri", redirectUri);
-  authUrl.searchParams.set("response_type", "code");
-  authUrl.searchParams.set("scope", scopes.join(" "));
-  authUrl.searchParams.set("state", state);
-
-  return NextResponse.redirect(authUrl);
+  return createAuthorizationResponse(
+    { issuer, clientId, redirectUri, scopes, defaultRedirect: "/" },
+    returnTo,
+  );
 }
 
 export { createGateProxy as gateProxy };

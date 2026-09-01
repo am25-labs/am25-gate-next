@@ -6,7 +6,8 @@ Server-side SDK for integrating Next.js 16+ applications with **AM25 Gate IdP**,
 
 - **TypeScript-first**: Full type definitions with exported interfaces
 - Server-first authentication: no React providers, no forced CSR
-- OAuth 2.0 + OIDC: Authorization Code flow with full scope support
+- OAuth 2.0 + OIDC: Authorization Code flow with PKCE S256 and nonce validation
+- Login CSRF protection: short-lived host-only transaction cookies and one-time state
 - Proxy for Next.js 16: Server-level route protection
 - httpOnly Cookie: Secure session shared across subdomains
 - React Helpers: Cached functions for Server Components
@@ -50,15 +51,31 @@ GATE_REDIRECT_URI=https://myapp.example.com/api/auth/callback
 # Cookie
 COOKIE_DOMAIN=.example.com
 
-# For client-side components (LoginButton)
-NEXT_PUBLIC_GATE_ISSUER=https://gate.example.com
-NEXT_PUBLIC_GATE_CLIENT_ID=your-client-id
-NEXT_PUBLIC_GATE_REDIRECT_URI=https://myapp.example.com/api/auth/callback
 ```
 
 You do not need `JWT_SECRET`. Tokens are verified using Gate's public key (JWKS).
 
 ### 2. Create API Routes
+
+#### `/api/auth/login/route.ts`
+
+Creates the browser-bound OAuth transaction and redirects to Gate.
+
+```ts
+import { createLoginHandler } from "@am25/gate-next";
+import type { NextRequest } from "next/server";
+
+const handler = createLoginHandler({
+  issuer: process.env.GATE_ISSUER!,
+  clientId: process.env.GATE_CLIENT_ID!,
+  redirectUri: process.env.GATE_REDIRECT_URI!,
+  defaultRedirect: "/dashboard",
+});
+
+export async function GET(request: NextRequest) {
+  return handler(request);
+}
+```
 
 #### `/api/auth/callback/route.ts`
 
@@ -386,9 +403,6 @@ import { getLoginUrl } from "@am25/gate-next";
 export function LoginButton() {
   const handleLogin = () => {
     const url = getLoginUrl({
-      issuer: process.env.NEXT_PUBLIC_GATE_ISSUER!,
-      clientId: process.env.NEXT_PUBLIC_GATE_CLIENT_ID!,
-      redirectUri: process.env.NEXT_PUBLIC_GATE_REDIRECT_URI!,
       returnTo: "/dashboard",
     });
     window.location.href = url;
@@ -409,9 +423,6 @@ import { getLoginUrl } from "@am25/gate-next";
 export function LoginButton() {
   const handleLogin = () => {
     const url = getLoginUrl({
-      issuer: process.env.NEXT_PUBLIC_GATE_ISSUER,
-      clientId: process.env.NEXT_PUBLIC_GATE_CLIENT_ID,
-      redirectUri: process.env.NEXT_PUBLIC_GATE_REDIRECT_URI,
       returnTo: "/dashboard",
     });
     window.location.href = url;
@@ -487,6 +498,18 @@ Creates a proxy to protect routes in Next.js 16.
 
 Returns `null` if the route does not require protection or the session is valid. Returns `NextResponse.redirect` if authentication is required.
 
+### `createLoginHandler(options)`
+
+Creates the local login endpoint. It generates a cryptographically random `state`, PKCE verifier/challenge, and OIDC nonce, then stores the transaction in a 10-minute httpOnly, SameSite=Lax, host-only cookie. In production the cookie uses the `__Host-` prefix.
+
+| Option            | Type     | Required | Default                                   | Description                         |
+| ----------------- | -------- | -------- | ----------------------------------------- | ----------------------------------- |
+| `issuer`          | string   | Yes      |                                           | Gate server URL                     |
+| `clientId`        | string   | Yes      |                                           | Client ID                           |
+| `redirectUri`     | string   | Yes      |                                           | Registered callback URI             |
+| `scopes`          | string[] | No       | `["openid", "profile", "email", "users"]` | Scopes requested                    |
+| `defaultRedirect` | string   | No       | `"/dashboard"`                          | Local fallback after authentication |
+
 ### `createCallbackHandler(options)`
 
 Creates the handler to exchange the authorization code for tokens.
@@ -503,7 +526,7 @@ Creates the handler to exchange the authorization code for tokens.
 | `cookieMaxAge`    | number | No       | `2592000` (30d) | Duration in seconds                   |
 | `defaultRedirect` | string | No       | `"/dashboard"`  | Route after login                     |
 
-The handler requires both `session_token` and `access_token`. It stores them in separate httpOnly cookies; the access token cookie has a maximum age of 1 hour for server-side SDK helpers.
+The handler rejects callbacks without the matching browser transaction, sends the PKCE verifier during the code exchange, validates the ID token audience and nonce, consumes the transaction cookie, and accepts only same-origin local return paths. It then stores `session_token` and `access_token` in separate httpOnly cookies; the access token cookie has a maximum age of 1 hour for server-side SDK helpers.
 
 ### `createLogoutHandler(options)`
 
@@ -561,15 +584,12 @@ All functions are cached per request using `React.cache()`. Session reads valida
 
 ### `getLoginUrl(options)`
 
-Generates the URL to start the OAuth flow.
+Generates the local URL that starts the OAuth flow through `createLoginHandler`.
 
-| Option        | Type     | Required | Default                                   | Description                    |
-| ------------- | -------- | -------- | ----------------------------------------- | ------------------------------ |
-| `issuer`      | string   | Yes      |                                           | Gate server URL                |
-| `clientId`    | string   | Yes      |                                           | Client ID                      |
-| `redirectUri` | string   | Yes      |                                           | Callback URI                   |
-| `scopes`      | string[] | No       | `["openid", "profile", "email", "users"]` | Scopes to request              |
-| `returnTo`    | string   | No       |                                           | Route to return to after login |
+| Option          | Type   | Required | Default             | Description                    |
+| --------------- | ------ | -------- | ------------------- | ------------------------------ |
+| `loginEndpoint` | string | No       | `"/api/auth/login"` | Local login handler route      |
+| `returnTo`      | string | No       |                     | Local route after login        |
 
 ### `getLogoutUrl(options)`
 
@@ -588,10 +608,8 @@ Creates a reusable configuration that encapsulates `getLoginUrl` and `getLogoutU
 import { createAuthConfig } from "@am25/gate-next";
 
 const auth = createAuthConfig({
-  issuer: process.env.NEXT_PUBLIC_GATE_ISSUER!,
-  clientId: process.env.NEXT_PUBLIC_GATE_CLIENT_ID!,
-  redirectUri: process.env.NEXT_PUBLIC_GATE_REDIRECT_URI!,
-  scopes: ["openid", "profile", "email", "users"],
+  loginEndpoint: "/api/auth/login",
+  logoutEndpoint: "/api/auth/logout",
 });
 
 const loginUrl = auth.getLoginUrl("/dashboard");
@@ -661,6 +679,7 @@ import type {
   SessionHelpers,
   SessionHelpersOptions,
   GateProxyOptions,
+  LoginHandlerOptions,
   CallbackHandlerOptions,
   LogoutHandlerOptions,
   LoginUrlOptions,
@@ -673,12 +692,13 @@ import type {
 ## Authentication flow
 
 ```
-User            App (proxy)            Gate (IdP)           App (callback)
+User            App (login/proxy)      Gate (IdP)           App (callback)
   |                  |                      |                      |
   | GET /dashboard   |                      |                      |
   | ---------------> |                      |                      |
   |                  |                      |                      |
-  |                  | No valid cookie      |                      |
+  |                  | Create state, PKCE, nonce                    |
+  |                  | Set transaction cookie                      |
   |                  | Redirect to Gate     |                      |
   | <--------------- |                      |                      |
   |                  |                      |                      |
@@ -688,15 +708,17 @@ User            App (proxy)            Gate (IdP)           App (callback)
   | Redirect with authorization code       |                      |
   | <---------------------------------------|                      |
   |                  |                      |                      |
-  | GET /api/auth/callback?code=xxx                               |
+  | GET /api/auth/callback?code=xxx&state=xxx                     |
   | -------------------------------------------------------------->|
   |                  |                      |                      |
   |                  |                      | POST /oauth/token    |
+  |                  |                      | + code_verifier      |
   |                  |                      |<---------------------|
   |                  |                      |                      |
   |                  |                      | Returns tokens       |
   |                  |                      |--------------------->|
   |                  |                      |                      |
+  | Validate state + nonce; consume transaction cookie             |
   | Set-Cookie: am25_sess (httpOnly, RS256)                       |
   | <--------------------------------------------------------------|
   |                  |                      |                      |

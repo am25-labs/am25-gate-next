@@ -4,6 +4,9 @@ export type { GateProxyOptions } from "./proxy.js";
 export { createCallbackHandler, handleCallback } from "./handlers/callback.js";
 export type { CallbackHandlerOptions } from "./handlers/callback.js";
 
+export { createLoginHandler, handleLogin } from "./handlers/login.js";
+export type { LoginHandlerOptions } from "./handlers/login.js";
+
 export { createLogoutHandler, handleLogout } from "./handlers/logout.js";
 export type { LogoutHandlerOptions } from "./handlers/logout.js";
 

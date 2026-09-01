@@ -1,4 +1,10 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { verifyTokenWithJWKS } from "../lib/jwks.js";
+import {
+  clearOAuthTransaction,
+  normalizeReturnTo,
+  readOAuthTransaction,
+} from "../lib/oauth-transaction.js";
 
 export interface CallbackHandlerOptions {
   issuer: string;
@@ -39,15 +45,28 @@ export function createCallbackHandler(options: CallbackHandlerOptions) {
     const state = searchParams.get("state");
     const error = searchParams.get("error");
 
+    const transaction = readOAuthTransaction(request, state);
+    if (!transaction) {
+      return clearOAuthTransaction(
+        NextResponse.redirect(`${appOrigin}/login?error=invalid_oauth_state`),
+        state,
+      );
+    }
+
     if (error) {
-      const errorDescription = searchParams.get("error_description") || error;
-      return NextResponse.redirect(
-        `${appOrigin}/login?error=${encodeURIComponent(errorDescription)}`,
+      return clearOAuthTransaction(
+        NextResponse.redirect(
+          `${appOrigin}/login?error=${encodeURIComponent(error)}`,
+        ),
+        state,
       );
     }
 
     if (!code) {
-      return NextResponse.redirect(`${appOrigin}/login?error=missing_code`);
+      return clearOAuthTransaction(
+        NextResponse.redirect(`${appOrigin}/login?error=missing_code`),
+        state,
+      );
     }
 
     try {
@@ -62,14 +81,18 @@ export function createCallbackHandler(options: CallbackHandlerOptions) {
           redirect_uri: redirectUri,
           client_id: clientId,
           client_secret: clientSecret,
+          code_verifier: transaction.codeVerifier,
         }),
       });
 
       if (!tokenResponse.ok) {
         const errorData = await tokenResponse.json().catch(() => ({}));
         console.error("Token exchange failed:", errorData);
-        return NextResponse.redirect(
-          `${appOrigin}/login?error=token_exchange_failed`,
+        return clearOAuthTransaction(
+          NextResponse.redirect(
+            `${appOrigin}/login?error=token_exchange_failed`,
+          ),
+          state,
         );
       }
 
@@ -78,26 +101,47 @@ export function createCallbackHandler(options: CallbackHandlerOptions) {
         typeof tokens.session_token !== "string" ||
         typeof tokens.access_token !== "string"
       ) {
-        return NextResponse.redirect(
-          `${appOrigin}/login?error=invalid_token_response`,
+        return clearOAuthTransaction(
+          NextResponse.redirect(
+            `${appOrigin}/login?error=invalid_token_response`,
+          ),
+          state,
         );
       }
 
-      let redirectTo = defaultRedirect;
-      if (state) {
-        try {
-          const stateData = JSON.parse(
-            Buffer.from(state, "base64url").toString(),
+      if (transaction.expectsIdToken) {
+        if (typeof tokens.id_token !== "string") {
+          return clearOAuthTransaction(
+            NextResponse.redirect(
+              `${appOrigin}/login?error=invalid_id_token`,
+            ),
+            state,
           );
-          if (stateData.returnTo) {
-            redirectTo = stateData.returnTo;
-          }
-        } catch {
-          // Invalid state, use default
+        }
+
+        const idToken = await verifyTokenWithJWKS(
+          tokens.id_token,
+          issuer,
+          undefined,
+          { audience: clientId },
+        );
+        if (idToken.nonce !== transaction.nonce) {
+          return clearOAuthTransaction(
+            NextResponse.redirect(`${appOrigin}/login?error=invalid_nonce`),
+            state,
+          );
         }
       }
 
-      const response = NextResponse.redirect(`${appOrigin}${redirectTo}`);
+      const redirectTo = normalizeReturnTo(
+        transaction.returnTo,
+        appOrigin,
+        defaultRedirect,
+      );
+      const response = clearOAuthTransaction(
+        NextResponse.redirect(new URL(redirectTo, appOrigin)),
+        state,
+      );
 
       const cookieOptions = {
         httpOnly: true,
@@ -124,7 +168,10 @@ export function createCallbackHandler(options: CallbackHandlerOptions) {
       return response;
     } catch (error) {
       console.error("Callback handler error:", error);
-      return NextResponse.redirect(`${appOrigin}/login?error=callback_failed`);
+      return clearOAuthTransaction(
+        NextResponse.redirect(`${appOrigin}/login?error=callback_failed`),
+        state,
+      );
     }
   };
 }
