@@ -1,6 +1,6 @@
 {
   "name": "@am25/gate-next",
-  "version": "2.1.0",
+  "version": "3.0.0",
   "description": "AM25 Gate (OAuth2+OIDC Authentication) SDK for Next.js",
   "type": "module",
   "main": "./dist/index.js",

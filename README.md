@@ -12,6 +12,8 @@ Server-side SDK for integrating Next.js 16+ applications with **AM25 Gate IdP**,
 - React Helpers: Cached functions for Server Components
 - RS256 (JWKS): Token verification using public keys, no shared secrets
 - Assigned users: Fetch the users assigned to the current client app
+- Active token validation: Signature, audience, grant revocation, and current claims
+- Federated token revocation during logout
 
 ## Installation
 
@@ -104,14 +106,16 @@ export async function GET(request) {
 
 #### `/api/auth/logout/route.ts`
 
-Clears the local cookie and optionally logs out from Gate (federated logout).
+Revokes the current OAuth grant, clears the local cookies, and logs out from Gate.
 
 ```ts
 import { createLogoutHandler } from "@am25/gate-next";
 import type { NextRequest } from "next/server";
 
 const handler = createLogoutHandler({
-  issuer: process.env.GATE_ISSUER,
+  issuer: process.env.GATE_ISSUER!,
+  clientId: process.env.GATE_CLIENT_ID!,
+  clientSecret: process.env.GATE_CLIENT_SECRET,
   redirectUri: process.env.GATE_REDIRECT_URI!,
   cookieDomain: process.env.COOKIE_DOMAIN,
   redirectTo: "/",
@@ -130,6 +134,8 @@ import { createLogoutHandler } from "@am25/gate-next";
 
 const handler = createLogoutHandler({
   issuer: process.env.GATE_ISSUER,
+  clientId: process.env.GATE_CLIENT_ID,
+  clientSecret: process.env.GATE_CLIENT_SECRET,
   redirectUri: process.env.GATE_REDIRECT_URI,
   cookieDomain: process.env.COOKIE_DOMAIN,
   redirectTo: "/",
@@ -209,6 +215,7 @@ export const {
   requireAdmin,
 } = createSessionHelpers({
   issuer: process.env.GATE_ISSUER!,
+  clientId: process.env.GATE_CLIENT_ID!,
 });
 ```
 
@@ -226,6 +233,7 @@ export const {
   requireAdmin,
 } = createSessionHelpers({
   issuer: process.env.GATE_ISSUER,
+  clientId: process.env.GATE_CLIENT_ID,
 });
 ```
 
@@ -495,7 +503,7 @@ Creates the handler to exchange the authorization code for tokens.
 | `cookieMaxAge`    | number | No       | `2592000` (30d) | Duration in seconds                   |
 | `defaultRedirect` | string | No       | `"/dashboard"`  | Route after login                     |
 
-The handler stores the `session_token` (or `access_token` as fallback) in an httpOnly session cookie. It also stores `access_token` in a separate httpOnly cookie with a maximum age of 1 hour for server-side SDK helpers.
+The handler requires both `session_token` and `access_token`. It stores them in separate httpOnly cookies; the access token cookie has a maximum age of 1 hour for server-side SDK helpers.
 
 ### `createLogoutHandler(options)`
 
@@ -504,21 +512,40 @@ Creates the logout handler.
 | Option         | Type   | Required | Default       | Description                                 |
 | -------------- | ------ | -------- | ------------- | ------------------------------------------- |
 | `redirectUri`  | string | Yes      |               | Callback URI (used to determine app origin) |
-| `issuer`       | string | No       |               | Gate URL (enables federated logout)         |
+| `issuer`       | string | Yes      |               | Gate URL                                    |
+| `clientId`     | string | Yes      |               | Client ID used to revoke the current grant  |
+| `clientSecret` | string | No       |               | Client secret for confidential clients      |
 | `cookieName`   | string | No       | `"am25_sess"` | Cookie name                                 |
+| `accessCookieName` | string | No   | `"am25_at"`   | Access token cookie name                    |
 | `cookieDomain` | string | No       |               | Cookie domain                               |
 | `redirectTo`   | string | No       | `"/"`         | Route after logout                          |
 
-**Federated logout:** If `issuer` is provided, logout redirects to Gate to close the user's global session across all apps. Otherwise, it only clears the local cookie.
+**Federated logout:** Logout revokes the current OAuth grant before deleting either cookie and redirecting to Gate. If revocation cannot be confirmed, the handler returns `502` and preserves the cookies so the operation can be retried.
+
+### `verifyActiveAccessToken(token, options)`
+
+Validates an access token cryptographically and then calls Gate `/oauth/userinfo` to enforce current grant revocation, account state, client access, and live authorization claims.
+
+```ts
+import { verifyActiveAccessToken } from "@am25/gate-next";
+
+const claims = await verifyActiveAccessToken(token, {
+  issuer: process.env.GATE_ISSUER!,
+  clientId: process.env.GATE_CLIENT_ID!,
+});
+```
+
+Use this helper in resource-server endpoints that accept bearer tokens. `verifyTokenWithJWKS()` remains appropriate for purely cryptographic verification when live revocation is not required.
 
 ### `createSessionHelpers(options)`
 
 Creates helpers to access the session in Server Components.
 
-| Option       | Type   | Required | Default       | Description     |
-| ------------ | ------ | -------- | ------------- | --------------- |
-| `issuer`     | string | Yes      |               | Gate server URL |
-| `cookieName` | string | No       | `"am25_sess"` | Cookie name     |
+| Option       | Type   | Required | Default       | Description                          |
+| ------------ | ------ | -------- | ------------- | ------------------------------------ |
+| `issuer`     | string | Yes      |               | Gate server URL                      |
+| `clientId`   | string | Yes      |               | Client whose grant must remain valid |
+| `cookieName` | string | No       | `"am25_sess"` | Cookie name                          |
 
 Returns a `SessionHelpers` object:
 
@@ -530,7 +557,7 @@ Returns a `SessionHelpers` object:
 | `requireAuth()`        | `GateUser`             | User data, throws if not authenticated   |
 | `requireAdmin()`       | `GateUser`             | User data, throws if not admin           |
 
-All functions are cached per request using `React.cache()`.
+All functions are cached per request using `React.cache()`. Session reads validate the JWT locally and confirm its current grant, user state, and client access with Gate. Validation fails closed when Gate cannot be reached.
 
 ### `getLoginUrl(options)`
 

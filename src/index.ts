@@ -15,6 +15,9 @@ export type { LoginUrlOptions, LogoutUrlOptions, AuthConfigOptions, AuthConfig }
 
 export { verifyTokenWithJWKS, clearJWKSCache } from "./lib/jwks.js";
 
+export { verifyActiveAccessToken } from "./lib/access-token.js";
+export type { ActiveAccessTokenOptions } from "./lib/access-token.js";
+
 export { createUserHelpers } from "./lib/users.js";
 export type { UserHelpersOptions, GateAssignedUser, UserSync, UserHelpers } from "./lib/users.js";
 

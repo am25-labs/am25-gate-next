@@ -5,6 +5,7 @@ import type { JWTPayload } from "jose";
 
 export interface SessionHelpersOptions {
   issuer: string;
+  clientId: string;
   cookieName?: string;
 }
 
@@ -29,9 +30,12 @@ export interface SessionHelpers {
 }
 
 export function createSessionHelpers(options: SessionHelpersOptions): SessionHelpers {
-  const { issuer, cookieName = "am25_sess" } = options;
+  const { issuer, clientId, cookieName = "am25_sess" } = options;
 
   if (!issuer) throw new Error("issuer is required");
+  if (!clientId) throw new Error("clientId is required");
+
+  const normalizedIssuer = issuer.replace(/\/$/, "");
 
   const getSession = cache(async (): Promise<JWTPayload | null> => {
     try {
@@ -40,15 +44,27 @@ export function createSessionHelpers(options: SessionHelpersOptions): SessionHel
 
       if (!token) return null;
 
-      const payload = await verifyTokenWithJWKS(token, issuer, "st+jwt");
+      const payload = await verifyTokenWithJWKS(token, normalizedIssuer, "st+jwt");
+      const response = await fetch(
+        `${normalizedIssuer}/api/auth/session?client_id=${encodeURIComponent(clientId)}`,
+        {
+          headers: { Cookie: `${cookieName}=${token}` },
+          cache: "no-store",
+        },
+      );
+      if (!response.ok) return null;
+
+      const activeSession = (await response.json()) as { id?: unknown };
+      if (activeSession.id !== payload.sub) return null;
+
       return payload;
     } catch {
       return null;
     }
   });
 
-  const nsIsAdmin = `${issuer.replace(/\/$/, "")}/is_admin`;
-  const namespace = issuer.replace(/\/$/, "");
+  const nsIsAdmin = `${normalizedIssuer}/is_admin`;
+  const namespace = normalizedIssuer;
   const nsOrganizationId = `${namespace}/organization_id`;
   const nsOrganizationType = `${namespace}/organization_type`;
   const nsOrganizationRole = `${namespace}/organization_role`;

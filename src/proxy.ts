@@ -60,8 +60,11 @@ export function createGateProxy(options: GateProxyOptions) {
       if (sessionRes.status === 403) {
         return NextResponse.redirect(new URL("/unauthorized", issuer));
       }
+      if (!sessionRes.ok) {
+        return redirectToLogin(request, issuer, clientId, redirectUri, scopes);
+      }
     } catch {
-      // Gate unreachable — fail open, JWT is already verified
+      return redirectToLogin(request, issuer, clientId, redirectUri, scopes);
     }
 
     return null;

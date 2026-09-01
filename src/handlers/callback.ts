@@ -74,6 +74,14 @@ export function createCallbackHandler(options: CallbackHandlerOptions) {
       }
 
       const tokens = await tokenResponse.json();
+      if (
+        typeof tokens.session_token !== "string" ||
+        typeof tokens.access_token !== "string"
+      ) {
+        return NextResponse.redirect(
+          `${appOrigin}/login?error=invalid_token_response`,
+        );
+      }
 
       let redirectTo = defaultRedirect;
       if (state) {
@@ -101,19 +109,17 @@ export function createCallbackHandler(options: CallbackHandlerOptions) {
 
       response.cookies.set(
         cookieName,
-        tokens.session_token || tokens.access_token,
+        tokens.session_token,
         {
           ...cookieOptions,
           maxAge: cookieMaxAge,
         },
       );
 
-      if (tokens.access_token) {
-        response.cookies.set(accessCookieName, tokens.access_token, {
-          ...cookieOptions,
-          maxAge: Math.min(cookieMaxAge, 60 * 60),
-        });
-      }
+      response.cookies.set(accessCookieName, tokens.access_token, {
+        ...cookieOptions,
+        maxAge: Math.min(cookieMaxAge, 60 * 60),
+      });
 
       return response;
     } catch (error) {
